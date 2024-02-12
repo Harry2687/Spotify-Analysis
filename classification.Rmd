@@ -145,16 +145,18 @@ kmeans_select_features <- function(n, data) {
   return(factor_combinations_n)
 }
 
-factor_combinations_n <- bind_rows(kmeans_select_features(2, track_features),
-                                   kmeans_select_features(3, track_features),
-                                   kmeans_select_features(4, track_features),
-                                   kmeans_select_features(5, track_features),
-                                   kmeans_select_features(6, track_features),
-                                   kmeans_select_features(7, track_features),
-                                   kmeans_select_features(8, track_features),
-                                   kmeans_select_features(9, track_features),
-                                   kmeans_select_features(10, track_features)) %>%
+cl <- makeCluster(detectCores())
+registerDoParallel(cl)
+factor_combinations_n <- foreach(n = seq(2:3),
+                                 .packages = c("tidyverse",
+                                               "cluster",
+                                               "factoextra",
+                                               "rlang"),
+                                 .combine = bind_rows) %dopar% {
+                                   kmeans_select_features(n, track_features)
+                                 } %>% 
   arrange(total_withinss)
+stopCluster(cl)
 
 for (i in 1:20) {
   factor_combinations_n %>%
