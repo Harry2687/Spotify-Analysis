@@ -1,0 +1,153 @@
+---
+title: "Classification Analysis"
+author: "Harry Zhong"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r}
+source("packages.R")
+```
+
+```{r}
+track_features <- read_csv("track_features.csv")
+```
+
+```{r}
+track_features <- unique_tracks_split %>%
+  mutate(track_artist = paste(trackName, artistName, sep = " - ")) %>%
+  select(-artistName, -trackName) %>%
+  column_to_rownames(var = "track_artist") %>%
+  select(-trackID,
+         -key,
+         -mode,
+         -time_signature) %>%
+  scale()
+
+n_clusters <- fviz_nbclust(track_features, kmeans)[["data"]] %>%
+  slice(which.max(y)) %>% 
+  select(clusters) %>%
+  as.numeric()
+
+km <- track_features %>%
+  kmeans(centers = n_clusters) 
+
+fviz_cluster(km,
+             data = track_features, 
+             geom = "point", 
+             ellipse.type = "convex", 
+             ggtheme = theme_bw())
+```
+
+```{r}
+comb <- track_features %>%
+  colnames() %>%
+  combn(2, simplify = FALSE)
+
+factor_combinations <- do.call(rbind.data.frame, comb) %>%
+  rename(factor_1 = 1,
+         factor_2 = 2) %>%
+  mutate(data = map2(factor_1,
+                   factor_2,
+                   ~track_features %>%
+                     as.data.frame() %>%
+                     select(all_of(.x), all_of(.y)))) %>%
+  mutate(n_clusters = map(data,
+                          ~fviz_nbclust(.x, kmeans)[["data"]] %>%
+                            slice(which.max(y)) %>% 
+                            select(clusters) %>%
+                            as.numeric(),
+                          .progress = "Finding optimal n clusters") %>%
+           as.numeric()) %>%
+  mutate(km = map2(data,
+                   n_clusters,
+                   ~kmeans(.x, .y),
+                   .progress = "Calculating kmeans")) %>%
+  mutate(total_withinss = map(km,
+                              ~.x$tot.withinss) %>%
+           as.numeric()) %>%
+  mutate(km_plot = map2(km,
+                        data,
+                        ~fviz_cluster(.x,
+                                      data = .y, 
+                                      geom = "point", 
+                                      ellipse.type = "convex", 
+                                      ggtheme = theme_bw()))) %>%
+  arrange(total_withinss)
+
+for (i in 1:20) {
+  factor_combinations %>%
+    slice(i) %>%
+    pull(km_plot) %>%
+    print()
+}
+```
+
+```{r}
+set.seed(2687)
+
+kmeans_select_features <- function(n, data) {
+  n_factors <- n
+  
+  comb_n <- data %>%
+    colnames() %>%
+    combn(n_factors, simplify = FALSE)
+  
+  old_cols = seq(1, n_factors)
+  new_cols = paste0("factor_", seq(1, n_factors))
+  
+  new_cols_sym <- syms(new_cols)
+  
+  factor_combinations_n <- do.call(rbind.data.frame, comb_n) %>%
+    rename_with(~new_cols, all_of(old_cols)) %>%
+    mutate(factors = pmap(list(!!!new_cols_sym), c)) %>%
+    select(-(!!new_cols)) %>%
+    mutate(data = map(factors,
+                      ~data %>%
+                        as.data.frame() %>%
+                        select(all_of(.x)))) %>%
+    mutate(n_clusters = map(data,
+                            ~fviz_nbclust(.x, kmeans)[["data"]] %>%
+                              slice(which.max(y)) %>%
+                              select(clusters) %>%
+                              as.numeric(),
+                            .progress = "Finding optimal n clusters") %>%
+             as.numeric()) %>% 
+    mutate(km = map2(data,
+                     n_clusters,
+                     ~kmeans(.x, .y, nstart = 25, iter.max = 100),
+                     .progress = "Calculating kmeans")) %>%
+    mutate(total_withinss = map(km,
+                                ~.x$tot.withinss) %>%
+             as.numeric()) %>%
+    mutate(km_plot = map2(km,
+                          data,
+                          ~fviz_cluster(.x,
+                                        data = .y,
+                                        geom = "point",
+                                        ellipse.type = "convex",
+                                        ggtheme = theme_bw()))) %>%
+    arrange(total_withinss)  
+  
+  return(factor_combinations_n)
+}
+
+factor_combinations_n <- bind_rows(kmeans_select_features(2, track_features),
+                                   kmeans_select_features(3, track_features),
+                                   kmeans_select_features(4, track_features),
+                                   kmeans_select_features(5, track_features),
+                                   kmeans_select_features(6, track_features),
+                                   kmeans_select_features(7, track_features),
+                                   kmeans_select_features(8, track_features),
+                                   kmeans_select_features(9, track_features),
+                                   kmeans_select_features(10, track_features)) %>%
+  arrange(total_withinss)
+
+for (i in 1:20) {
+  factor_combinations_n %>%
+    slice(i) %>%
+    pull(km_plot) %>%
+    print()
+}
+```
+

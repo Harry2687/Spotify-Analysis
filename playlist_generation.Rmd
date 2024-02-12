@@ -1,0 +1,44 @@
+---
+title: "Playlist Generation"
+author: "Harry Zhong"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r}
+clusters <- factor_combinations %>%
+  slice(1) %>%
+  pull(km) %>%
+  map(~.x[["cluster"]]) %>%
+  as.data.frame() %>%
+  rownames_to_column("track_artist") %>%
+  rename(cluster = 2) %>%
+  left_join(unique_tracks_split %>%
+              mutate(track_artist = paste(trackName, artistName, sep = " - ")) %>%
+              select(track_artist,
+                     trackID),
+            by = "track_artist") %>%
+  mutate(trackID = paste0("spotify:track:", trackID))
+
+source("generate_token.R")
+
+playlist_id <- "1rKFvXyG3lllXHH74ZdUSJ"
+
+track_ids <- clusters %>%
+  filter(cluster == 1) %>%
+  pull(trackID)
+
+batches <- split(track_ids, ceiling(seq_along(track_ids)/10))
+
+for (batch in batches) {
+  POST(paste0("https://api.spotify.com/v1/playlists/", playlist_id, "/tracks"), 
+       body = list(uris = batch), 
+       encode = "json", 
+       add_headers(Authorization = paste0("Bearer ", spotify_token)))
+}
+
+# POST(paste0("https://api.spotify.com/v1/playlists/", playlist_id, "/tracks"), 
+#      body = list(uris = track_ids), 
+#      encode = "json", 
+#      add_headers(Authorization = paste0("Bearer ", spotify_token)))
+```
