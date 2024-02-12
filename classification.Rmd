@@ -10,11 +10,24 @@ source("packages.R")
 ```
 
 ```{r}
-track_features <- read_csv("track_features.csv")
+unique_tracks_split <- read_csv("track_features.csv")
+
+kaggle_dataset <- read_csv("kaggle_dataset.csv") %>%
+  rename(trackName = "track_name",
+         artistName = "artists",
+         trackID = "track_id",
+         index = 1) %>%
+  select(-album_name,
+         -popularity,
+         -explicit, 
+         -index, 
+         -track_genre) %>%
+  distinct(trackName, .keep_all = TRUE) %>%
+  slice(1:10000)
 ```
 
 ```{r}
-track_features <- unique_tracks_split %>%
+track_features <- kaggle_dataset %>%
   mutate(track_artist = paste(trackName, artistName, sep = " - ")) %>%
   select(-artistName, -trackName) %>%
   column_to_rownames(var = "track_artist") %>%

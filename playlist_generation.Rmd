@@ -6,7 +6,7 @@ output: html_document
 ---
 
 ```{r}
-clusters <- factor_combinations %>%
+clusters <- factor_combinations_n %>%
   slice(1) %>%
   pull(km) %>%
   map(~.x[["cluster"]]) %>%
