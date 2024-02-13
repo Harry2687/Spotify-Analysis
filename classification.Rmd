@@ -23,7 +23,7 @@ kaggle_dataset <- read_csv("kaggle_dataset.csv") %>%
          -index, 
          -track_genre) %>%
   distinct(trackName, .keep_all = TRUE) %>%
-  slice(1:10000)
+  slice(1:100)
 ```
 
 ```{r}
@@ -120,7 +120,10 @@ kmeans_select_features <- function(n, data) {
                         as.data.frame() %>%
                         select(all_of(.x)))) %>%
     mutate(n_clusters = map(data,
-                            ~fviz_nbclust(.x, kmeans)[["data"]] %>%
+                            ~fviz_nbclust(.x, 
+                                          kmeans, 
+                                          nstart = 25, 
+                                          iter.max = 50)[["data"]] %>%
                               slice(which.max(y)) %>%
                               select(clusters) %>%
                               as.numeric(),
@@ -128,7 +131,7 @@ kmeans_select_features <- function(n, data) {
              as.numeric()) %>% 
     mutate(km = map2(data,
                      n_clusters,
-                     ~kmeans(.x, .y, nstart = 25, iter.max = 100),
+                     ~kmeans(.x, .y, nstart = 25, iter.max = 50),
                      .progress = "Calculating kmeans")) %>%
     mutate(total_withinss = map(km,
                                 ~.x$tot.withinss) %>%
@@ -147,7 +150,7 @@ kmeans_select_features <- function(n, data) {
 
 cl <- makeCluster(detectCores())
 registerDoParallel(cl)
-factor_combinations_n <- foreach(n = seq(2:3),
+factor_combinations_n <- foreach(n = seq(2:10),
                                  .packages = c("tidyverse",
                                                "cluster",
                                                "factoextra",

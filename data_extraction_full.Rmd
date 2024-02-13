@@ -1,0 +1,26 @@
+---
+title: "Full History Data Extraction"
+author: "Harry Zhong"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r}
+source("packages.R")
+```
+
+```{r}
+files <- list.files(paste0(here(), "/data/full_history_data"), pattern = "*.json", full.names = TRUE)
+
+data <- lapply(files, function(x) {
+  data <- fromJSON(x, flatten = TRUE)
+  as.data.frame(data)
+})
+
+names(data) <- files %>%
+  basename() %>%
+  gsub(".json", "", .)
+
+list2env(data, envir = .GlobalEnv)
+```
+
