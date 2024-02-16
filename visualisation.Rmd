@@ -6,7 +6,7 @@ output: html_document
 ---
 
 ```{r}
-source("packages.R")
+source("scripts/packages.R")
 ```
 
 Summarise based on genre.
