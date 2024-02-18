@@ -10,7 +10,12 @@ source("scripts/packages.R")
 ```
 
 ```{r}
-unique_tracks_split <- read_csv("track_features.csv")
+track_features <- read_csv("data/feature_data/track_features.csv")
+
+full_track_features <- read_csv("data/feature_data/full_track_features.csv") %>%
+  rename(trackName = "track_name",
+         artistName = "artist_name",
+         trackID = "track_uri")
 
 kaggle_dataset <- read_csv("kaggle_dataset.csv") %>%
   rename(trackName = "track_name",
@@ -27,9 +32,9 @@ kaggle_dataset <- read_csv("kaggle_dataset.csv") %>%
 ```
 
 ```{r}
-track_features <- kaggle_dataset %>%
+feature_matrix <- full_track_features %>%
   mutate(track_artist = paste(trackName, artistName, sep = " - ")) %>%
-  select(-artistName, -trackName) %>%
+  select(-trackName, -artistName) %>%
   column_to_rownames(var = "track_artist") %>%
   select(-trackID,
          -key,
@@ -37,69 +42,26 @@ track_features <- kaggle_dataset %>%
          -time_signature) %>%
   scale()
 
-n_clusters <- fviz_nbclust(track_features, kmeans)[["data"]] %>%
+n_clusters <- fviz_nbclust(feature_matrix, 
+                           kmeans,
+                           nstart = 20,
+                           iter.max = 100)[["data"]] %>%
   slice(which.max(y)) %>% 
   select(clusters) %>%
   as.numeric()
 
-km <- track_features %>%
+km <- feature_matrix %>%
   kmeans(centers = n_clusters) 
 
 fviz_cluster(km,
-             data = track_features, 
+             data = feature_matrix, 
              geom = "point", 
              ellipse.type = "convex", 
              ggtheme = theme_bw())
 ```
 
 ```{r}
-comb <- track_features %>%
-  colnames() %>%
-  combn(2, simplify = FALSE)
-
-factor_combinations <- do.call(rbind.data.frame, comb) %>%
-  rename(factor_1 = 1,
-         factor_2 = 2) %>%
-  mutate(data = map2(factor_1,
-                   factor_2,
-                   ~track_features %>%
-                     as.data.frame() %>%
-                     select(all_of(.x), all_of(.y)))) %>%
-  mutate(n_clusters = map(data,
-                          ~fviz_nbclust(.x, kmeans)[["data"]] %>%
-                            slice(which.max(y)) %>% 
-                            select(clusters) %>%
-                            as.numeric(),
-                          .progress = "Finding optimal n clusters") %>%
-           as.numeric()) %>%
-  mutate(km = map2(data,
-                   n_clusters,
-                   ~kmeans(.x, .y),
-                   .progress = "Calculating kmeans")) %>%
-  mutate(total_withinss = map(km,
-                              ~.x$tot.withinss) %>%
-           as.numeric()) %>%
-  mutate(km_plot = map2(km,
-                        data,
-                        ~fviz_cluster(.x,
-                                      data = .y, 
-                                      geom = "point", 
-                                      ellipse.type = "convex", 
-                                      ggtheme = theme_bw()))) %>%
-  arrange(total_withinss)
-
-for (i in 1:20) {
-  factor_combinations %>%
-    slice(i) %>%
-    pull(km_plot) %>%
-    print()
-}
-```
-
-```{r}
-set.seed(2687)
-
-kmeans_select_features <- function(n, data) {
+kmeans_select_features <- function(n, data, nstart, itermax) {
   n_factors <- n
   
   comb_n <- data %>%
@@ -122,17 +84,25 @@ kmeans_select_features <- function(n, data) {
     mutate(n_clusters = map(data,
                             ~fviz_nbclust(.x, 
                                           kmeans, 
-                                          nstart = 25, 
-                                          iter.max = 50)[["data"]] %>%
+                                          nstart = nstart, 
+                                          iter.max = itermax)[["data"]] %>%
                               slice(which.max(y)) %>%
                               select(clusters) %>%
                               as.numeric(),
-                            .progress = "Finding optimal n clusters") %>%
+                            .progress = paste("Finding optimal n_clusters:", 
+                                              n_factors, 
+                                              "factors")) %>%
              as.numeric()) %>% 
     mutate(km = map2(data,
                      n_clusters,
-                     ~kmeans(.x, .y, nstart = 25, iter.max = 50),
-                     .progress = "Calculating kmeans")) %>%
+                     ~kmeans(.x, 
+                             .y, 
+                             nstart = nstart, 
+                             iter.max = itermax,
+                             algorithm = "MacQueen"),
+                     .progress = paste("Calculating kmeans:", 
+                                       n_factors, 
+                                       "factors"))) %>%
     mutate(total_withinss = map(km,
                                 ~.x$tot.withinss) %>%
              as.numeric()) %>%
@@ -147,18 +117,37 @@ kmeans_select_features <- function(n, data) {
   
   return(factor_combinations_n)
 }
+```
+
+```{r}
+set.seed(2687)
+
+kmeans_2fact <- kmeans_select_features(2, feature_matrix, 25, 1000)
+
+for (i in 1:20) {
+  kmeans_2fact %>%
+    slice(i) %>%
+    pull(km_plot) %>%
+    print()
+}
+```
+
+```{r}
+set.seed(2687)
 
 cl <- makeCluster(detectCores())
 registerDoParallel(cl)
-factor_combinations_n <- foreach(n = seq(2:10),
+
+factor_combinations_n <- foreach(n = seq(2, 3),
                                  .packages = c("tidyverse",
                                                "cluster",
                                                "factoextra",
                                                "rlang"),
                                  .combine = bind_rows) %dopar% {
-                                   kmeans_select_features(n, track_features)
+                                   kmeans_select_features(n, feature_matrix, 25, 1000)
                                  } %>% 
   arrange(total_withinss)
+
 stopCluster(cl)
 
 for (i in 1:20) {

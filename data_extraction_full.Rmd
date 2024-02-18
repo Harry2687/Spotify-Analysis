@@ -10,17 +10,83 @@ source("scripts/packages.R")
 ```
 
 ```{r}
-files <- list.files(paste0(here(), "/data/full_history_data"), pattern = "*.json", full.names = TRUE)
+files <- list.files(paste0(here(), "/data/full_history_data"), 
+                    pattern = "*.json", 
+                    full.names = TRUE)
 
-data <- lapply(files, function(x) {
-  data <- fromJSON(x, flatten = TRUE)
-  as.data.frame(data)
-})
+full_streaming_history <- foreach(file = files, 
+                                  .packages = c("jsonlite"),
+                                  .combine = rbind) %do% {
+  fromJSON(file, flatten = TRUE)
+}
+```
 
-names(data) <- files %>%
-  basename() %>%
-  gsub(".json", "", .)
+```{r}
+query_tracks <- full_streaming_history %>%
+  distinct(master_metadata_track_name, 
+           master_metadata_album_artist_name,
+           spotify_track_uri) %>%
+  na.omit() %>%
+  rename(track_name = "master_metadata_track_name",
+         artist_name = "master_metadata_album_artist_name") %>%
+  mutate(track_uri = gsub("spotify:track:", "", spotify_track_uri)) %>%
+  select(-spotify_track_uri) %>% 
+  filter(!(track_uri %in% pull(full_track_features, track_uri))) %>%
+  slice(1:2000)
 
-list2env(data, envir = .GlobalEnv)
+source("scripts/generate_token.R")
+
+query_track_features <- query_tracks %>%
+  mutate(audio_features = map(track_uri,
+                              ~get_audio_features(.x),
+                              .progress = "Getting Audio Features")) %>%
+  filter(!map_lgl(audio_features, ~"error" %in% names(.x)))
+
+full_track_features <- bind_rows(full_track_features,
+                                 query_track_features) %>%
+  distinct()
+```
+
+```{r}
+full_track_features_split <- full_track_features %>%
+  distinct(track_name, 
+           artist_name, 
+           .keep_all = TRUE) %>%
+  mutate(label = map(audio_features, names)) %>%
+  unnest(c(audio_features, label)) %>%
+  mutate(audio_features = unlist(audio_features),
+         track_uri = unlist(track_uri)) %>%
+  pivot_wider(names_from = label, values_from = audio_features) %>%
+  select(track_name,
+         artist_name,
+         track_uri,
+         danceability,
+         energy,
+         key,
+         loudness,
+         mode,
+         speechiness,
+         acousticness,
+         instrumentalness,
+         liveness,
+         valence,
+         tempo,
+         duration_ms,
+         time_signature) %>%
+  mutate(danceability = as.numeric(danceability),
+         energy = as.numeric(energy),
+         key = as.numeric(key),
+         loudness = as.numeric(loudness),
+         mode = as.numeric(mode),
+         speechiness = as.numeric(speechiness),
+         acousticness = as.numeric(acousticness),
+         instrumentalness = as.numeric(instrumentalness),
+         liveness = as.numeric(liveness),
+         valence = as.numeric(valence),
+         tempo = as.numeric(tempo),
+         duration_ms = as.numeric(duration_ms),
+         time_signature = as.numeric(time_signature))
+
+write.csv(full_track_features_split, file = "full_track_features.csv", row.names = FALSE)
 ```
 

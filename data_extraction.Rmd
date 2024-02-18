@@ -102,7 +102,16 @@ get_audio_features <- function(track_id) {
   Sys.sleep(0.4)
   url = paste0("https://api.spotify.com/v1/audio-features/", track_id)
   response <- GET(url, add_headers(Authorization = paste("Bearer", spotify_token)))
-  fromJSON(content(response, "text", encoding = "UTF-8"))
+  data <- fromJSON(content(response, "text", encoding = "UTF-8"))
+  if ("error" %in% names(data)) {
+    source("scripts/generate_token.R")
+    Sys.sleep(0.4)
+    response <- GET(url, add_headers(Authorization = paste("Bearer", spotify_token)))
+    data <- fromJSON(content(response, "text", encoding = "UTF-8"))
+    return(data)
+  } else {
+    return(data)
+  }
 }
 ```
 
