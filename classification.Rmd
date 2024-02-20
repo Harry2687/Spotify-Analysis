@@ -137,8 +137,8 @@ set.seed(2687)
 
 cl <- makeCluster(detectCores())
 registerDoParallel(cl)
-
-factor_combinations_n <- foreach(n = seq(2, 3),
+start_time <- Sys.time()
+factor_combinations_n <- foreach(n = seq(2, ncol(feature_matrix)),
                                  .packages = c("tidyverse",
                                                "cluster",
                                                "factoextra",
@@ -147,7 +147,8 @@ factor_combinations_n <- foreach(n = seq(2, 3),
                                    kmeans_select_features(n, feature_matrix, 25, 1000)
                                  } %>% 
   arrange(total_withinss)
-
+end_time <- Sys.time()
+time_taken <- end_time - start_time
 stopCluster(cl)
 
 for (i in 1:20) {
@@ -156,5 +157,55 @@ for (i in 1:20) {
     pull(km_plot) %>%
     print()
 }
+
+factor_combinations_n_ratio = factor_combinations_n %>%
+  mutate(bsstssRatio = map(km,
+                           ~.x$betweenss/.x$totss) %>%
+           as.numeric()) %>%
+  arrange(desc(bsstssRatio))
+
+for (i in 1:20) {
+  factor_combinations_n_ratio %>%
+    slice(i) %>%
+    pull(km_plot) %>%
+    print()
+}
+```
+
+```{r}
+kmeans_clusters <- factor_combinations_n_ratio %>%
+  slice(1) %>%
+  pull(km) %>%
+  pluck(1) %>%
+  pluck("cluster") %>%
+  as.data.frame() %>%
+  rownames_to_column("track_artist") %>%
+  rename(cluster = 2)
+
+cluster_summary <- full_streaming_history %>%
+  select(ts,
+         master_metadata_track_name,
+         master_metadata_album_artist_name,
+         ms_played) %>%
+  na.omit() %>%
+  mutate(month = ts %>%
+           substring(1, 7) %>%
+           paste0("-01") %>%
+           ymd(),
+         track_artist = paste(master_metadata_track_name,
+                              master_metadata_album_artist_name,
+                              sep = " - ")) %>%
+  select(month,
+         track_artist,
+         ms_played) %>%
+  left_join(kmeans_clusters, by = "track_artist") %>%
+  group_by(month, cluster) %>%
+  summarise(hours_listened = sum(ms_played/(1000*60))) %>%
+  filter(month >= ymd("2019-04-01"))
+
+ggplot(cluster_summary, aes(x = month, y = hours_listened, fill = cluster, label = cluster)) +
+  geom_bar(position = "fill", stat = "identity") +
+  geom_text(size = 3, position = position_fill(vjust = 0.5)) +
+  theme(legend.position = "none")
 ```
 
