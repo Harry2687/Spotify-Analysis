@@ -17,7 +17,7 @@ full_track_features <- read_csv("data/feature_data/full_track_features.csv") %>%
          artistName = "artist_name",
          trackID = "track_uri")
 
-kaggle_dataset <- read_csv("kaggle_dataset.csv") %>%
+kaggle_dataset <- read_csv("data/feature_data/kaggle_dataset.csv") %>%
   rename(trackName = "track_name",
          artistName = "artists",
          trackID = "track_id",
@@ -27,8 +27,7 @@ kaggle_dataset <- read_csv("kaggle_dataset.csv") %>%
          -explicit, 
          -index, 
          -track_genre) %>%
-  distinct(trackName, .keep_all = TRUE) %>%
-  slice(1:100)
+  distinct(trackName, .keep_all = TRUE)
 ```
 
 ```{r}
@@ -41,23 +40,6 @@ feature_matrix <- full_track_features %>%
          -mode,
          -time_signature) %>%
   scale()
-
-n_clusters <- fviz_nbclust(feature_matrix, 
-                           kmeans,
-                           nstart = 20,
-                           iter.max = 100)[["data"]] %>%
-  slice(which.max(y)) %>% 
-  select(clusters) %>%
-  as.numeric()
-
-km <- feature_matrix %>%
-  kmeans(centers = n_clusters) 
-
-fviz_cluster(km,
-             data = feature_matrix, 
-             geom = "point", 
-             ellipse.type = "convex", 
-             ggtheme = theme_bw())
 ```
 
 ```{r}
@@ -68,8 +50,8 @@ kmeans_select_features <- function(n, data, nstart, itermax) {
     colnames() %>%
     combn(n_factors, simplify = FALSE)
   
-  old_cols = seq(1, n_factors)
-  new_cols = paste0("factor_", seq(1, n_factors))
+  old_cols <- seq(1, n_factors)
+  new_cols <- paste0("factor_", seq(1, n_factors))
   
   new_cols_sym <- syms(new_cols)
   
@@ -105,6 +87,9 @@ kmeans_select_features <- function(n, data, nstart, itermax) {
                                        "factors"))) %>%
     mutate(total_withinss = map(km,
                                 ~.x$tot.withinss) %>%
+             as.numeric(),
+           bsstssRatio = map(km,
+                             ~.x$betweenss/.x$totss) %>%
              as.numeric()) %>%
     mutate(km_plot = map2(km,
                           data,
@@ -113,7 +98,7 @@ kmeans_select_features <- function(n, data, nstart, itermax) {
                                         geom = "point",
                                         ellipse.type = "convex",
                                         ggtheme = theme_bw()))) %>%
-    arrange(total_withinss)  
+    arrange(desc(bsstssRatio))  
   
   return(factor_combinations_n)
 }
@@ -137,8 +122,10 @@ set.seed(2687)
 
 cl <- makeCluster(detectCores())
 registerDoParallel(cl)
+
 start_time <- Sys.time()
-factor_combinations_n <- foreach(n = seq(2, ncol(feature_matrix)),
+
+kmeans_nfact <- foreach(n = seq(2, ncol(feature_matrix)),
                                  .packages = c("tidyverse",
                                                "cluster",
                                                "factoextra",
@@ -146,26 +133,15 @@ factor_combinations_n <- foreach(n = seq(2, ncol(feature_matrix)),
                                  .combine = bind_rows) %dopar% {
                                    kmeans_select_features(n, feature_matrix, 25, 1000)
                                  } %>% 
-  arrange(total_withinss)
+  arrange(desc(bsstssRatio))
+
 end_time <- Sys.time()
 time_taken <- end_time - start_time
+
 stopCluster(cl)
 
 for (i in 1:20) {
-  factor_combinations_n %>%
-    slice(i) %>%
-    pull(km_plot) %>%
-    print()
-}
-
-factor_combinations_n_ratio = factor_combinations_n %>%
-  mutate(bsstssRatio = map(km,
-                           ~.x$betweenss/.x$totss) %>%
-           as.numeric()) %>%
-  arrange(desc(bsstssRatio))
-
-for (i in 1:20) {
-  factor_combinations_n_ratio %>%
+  kmeans_nfact %>%
     slice(i) %>%
     pull(km_plot) %>%
     print()
@@ -173,39 +149,86 @@ for (i in 1:20) {
 ```
 
 ```{r}
-kmeans_clusters <- factor_combinations_n_ratio %>%
-  slice(1) %>%
+kmeans_nfact_save <- kmeans_nfact %>%
+  select(-data) %>%
+  slice(1:20)
+
+save(kmeans_nfact_save, 
+     file = "data/R_data/kmeans_nfact.RData",
+     compress = "xz")
+```
+
+```{r}
+load("data/R_data/kmeans_nfact.RData")
+kmeans_nfact <- kmeans_nfact_save
+```
+
+```{r}
+km_index <- 5
+
+kmeans_clusters <- kmeans_nfact %>%
+  slice(km_index) %>%
+  pull(km) %>%
+  pluck(1) %>%
+  pluck("centers") %>%
+  as.data.frame() %>%
+  rownames_to_column("cluster") %>%
+  mutate(cluster = paste0("Cluster ", cluster))
+
+cluster_top_tracks <- kmeans_nfact %>%
+  slice(km_index) %>%
   pull(km) %>%
   pluck(1) %>%
   pluck("cluster") %>%
   as.data.frame() %>%
   rownames_to_column("track_artist") %>%
-  rename(cluster = 2)
+  rename(cluster = 2) %>% 
+  mutate(cluster = paste0("Cluster ", cluster)) %>%
+  left_join(full_streaming_history %>%
+              select(track_name,
+                     artist_name,
+                     ms_played) %>%
+              na.omit() %>%
+              group_by(track_name,
+                       artist_name) %>%
+              summarise(hours_listened = sum(ms_played/(1000*60))) %>%
+              mutate(track_artist = paste(track_name,
+                                          artist_name,
+                                          sep = " - ")),
+            .,
+            by = "track_artist") %>%
+  select(-track_artist) %>%
+  group_by(cluster) %>%
+  slice_max(hours_listened, n = 10) %>%
+  ungroup() %>%
+  select(cluster,
+         everything())
 
-cluster_summary <- full_streaming_history %>%
-  select(ts,
-         master_metadata_track_name,
-         master_metadata_album_artist_name,
-         ms_played) %>%
-  na.omit() %>%
-  mutate(month = ts %>%
-           substring(1, 7) %>%
-           paste0("-01") %>%
-           ymd(),
-         track_artist = paste(master_metadata_track_name,
-                              master_metadata_album_artist_name,
-                              sep = " - ")) %>%
-  select(month,
-         track_artist,
-         ms_played) %>%
-  left_join(kmeans_clusters, by = "track_artist") %>%
-  group_by(month, cluster) %>%
-  summarise(hours_listened = sum(ms_played/(1000*60))) %>%
-  filter(month >= ymd("2019-04-01"))
+track_clusters <- kmeans_nfact %>%
+  slice(km_index) %>%
+  pull(km) %>%
+  pluck(1) %>%
+  pluck("cluster") %>%
+  as.data.frame() %>%
+  rownames_to_column("track_artist") %>%
+  rename(cluster = 2) %>% 
+  mutate(cluster = paste0("Cluster ", cluster)) %>%
+  left_join(full_streaming_history %>%
+              select(track_name,
+                     artist_name) %>%
+              na.omit() %>%
+              distinct() %>%
+              mutate(track_artist = paste(track_name,
+                                          artist_name,
+                                          sep = " - ")),
+            .,
+            by = "track_artist") %>%
+  select(-track_artist) %>%
+  arrange(artist_name,
+          track_name)
 
-ggplot(cluster_summary, aes(x = month, y = hours_listened, fill = cluster, label = cluster)) +
-  geom_bar(position = "fill", stat = "identity") +
-  geom_text(size = 3, position = position_fill(vjust = 0.5)) +
-  theme(legend.position = "none")
+artist_clusters <- track_clusters %>%
+  group_by(artist_name,
+           cluster) %>%
+  summarise(count = n())
 ```
-

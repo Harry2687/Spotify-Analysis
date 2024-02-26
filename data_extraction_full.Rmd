@@ -7,6 +7,7 @@ output: html_document
 
 ```{r}
 source("scripts/packages.R")
+source("scripts/api_functions.R")
 ```
 
 ```{r}
@@ -18,37 +19,63 @@ full_streaming_history <- foreach(file = files,
                                   .packages = c("jsonlite"),
                                   .combine = rbind) %do% {
   fromJSON(file, flatten = TRUE)
-}
+} %>%
+  rename(track_name = "master_metadata_track_name",
+         artist_name = "master_metadata_album_artist_name") %>%
+  mutate(track_uri = gsub("spotify:track:", "", spotify_track_uri),
+         month = ts %>%
+           substring(1, 7) %>%
+           paste0("-01") %>%
+           ymd()) %>%
+  select(-spotify_track_uri) %>%
+  filter(month >= ymd("2019-04-01"))
 ```
 
 ```{r}
-query_tracks <- full_streaming_history %>%
-  distinct(master_metadata_track_name, 
-           master_metadata_album_artist_name,
-           spotify_track_uri) %>%
-  na.omit() %>%
-  rename(track_name = "master_metadata_track_name",
-         artist_name = "master_metadata_album_artist_name") %>%
-  mutate(track_uri = gsub("spotify:track:", "", spotify_track_uri)) %>%
-  select(-spotify_track_uri) %>% 
-  filter(!(track_uri %in% pull(full_track_features, track_uri))) %>%
-  slice(1:2000)
-
 source("scripts/generate_token.R")
 
-query_track_features <- query_tracks %>%
+full_tracks <- full_streaming_history %>%
+  distinct(track_name, 
+           artist_name,
+           track_uri) %>%
+  na.omit()
+
+full_track_features <- full_tracks %>%
+  slice(1:2000) %>%
   mutate(audio_features = map(track_uri,
                               ~get_audio_features(.x),
                               .progress = "Getting Audio Features")) %>%
   filter(!map_lgl(audio_features, ~"error" %in% names(.x)))
 
-full_track_features <- bind_rows(full_track_features,
-                                 query_track_features) %>%
-  distinct()
+n_remaining <- full_tracks %>%
+  filter(!(track_uri %in% pull(full_track_features, track_uri))) %>%
+  nrow()
+
+while (n_remaining > 0) {
+  source("scripts/generate_token.R")
+  
+  full_track_features_2 <- full_tracks %>%
+    filter(!(track_uri %in% pull(full_track_features, track_uri))) %>%
+    slice(1:2000) %>%
+    mutate(audio_features = map(track_uri,
+                                ~get_audio_features(.x),
+                                .progress = "Getting Audio Features")) %>%
+    filter(!map_lgl(audio_features, ~"error" %in% names(.x)))
+  
+  full_track_features <- bind_rows(full_track_features,
+                                   full_track_features_2) %>%
+    distinct()
+  
+  n_remaining <- full_tracks %>%
+    filter(!(track_uri %in% pull(full_track_features, track_uri))) %>%
+    nrow()
+  
+  print(paste0("n_remaining: ", n_rema))
+}
 ```
 
 ```{r}
-full_track_features_split <- full_track_features %>%
+full_track_features_wide <- full_track_features %>%
   distinct(track_name, 
            artist_name, 
            .keep_all = TRUE) %>%
@@ -87,6 +114,6 @@ full_track_features_split <- full_track_features %>%
          duration_ms = as.numeric(duration_ms),
          time_signature = as.numeric(time_signature))
 
-write.csv(full_track_features_split, file = "full_track_features.csv", row.names = FALSE)
+write.csv(full_track_features_wide, file = "full_track_features.csv", row.names = FALSE)
 ```
 

@@ -7,24 +7,21 @@ output: html_document
 
 ```{r}
 source("scripts/packages.R")
+source("scripts/api_functions.R")
 ```
 
 Extract streaming history data from .json files.
 
 ```{r}
-for (i in seq(0,2)) {
-  assign(paste0("streaming_history_", i),
-         fromJSON(
-           paste0("data/history_data/StreamingHistory_music_", i, ".json")
-           ) %>%
-           as.data.frame()
-         )
-}
+files <- list.files(paste0(here(), "/data/history_data"), 
+                    pattern = "*.json", 
+                    full.names = TRUE)
 
-streaming_history <- bind_rows(streaming_history_0,
-                               streaming_history_1,
-                               streaming_history_2
-                               ) %>%
+streaming_history <- foreach(file = files, 
+                                  .packages = c("jsonlite"),
+                                  .combine = rbind) %do% {
+  fromJSON(file, flatten = TRUE)
+} %>%
   mutate(endTime = endTime %>%
            substring(1, 7) %>%
            paste0("-01") %>%
@@ -38,26 +35,10 @@ Get Spotify token from API.
 source("scripts/generate_token.R")
 ```
 
-Make functions to get artist genres via artist id.
-
-```{r}
-search_artist <- function(artist_name) {
-  url <- "https://api.spotify.com/v1/search"
-  response <- GET(url, add_headers(Authorization = paste("Bearer", spotify_token)), query = list(q = artist_name, type = "artist", limit = 1))
-  content(response)$artists$items[[1]]$id
-}
-
-get_genres <- function(artist_id) {
-  url <- paste0("https://api.spotify.com/v1/artists/", artist_id)
-  response <- GET(url, add_headers(Authorization = paste("Bearer", spotify_token)))
-  content(response)$genres
-}
-```
-
 Match artists to genres using API functions.
 
 ```{r}
-unique_artists <- streaming_history %>% 
+artist_genres <- streaming_history %>% 
   select(artistName) %>%
   distinct() %>%
   mutate(
@@ -74,51 +55,10 @@ unique_artists <- streaming_history %>%
   )
 ```
 
-Make functions to get audio features via track id.
-
-```{r}
-search_track <- function(track_name, artist_name) {
-  #build in delay to not get rate limited
-  Sys.sleep(0.4)
-  track_name <- track_name %>%
-    str_replace_all("[^a-zA-Z\\s]", "") %>%
-    trimws() %>%
-    str_replace_all(" ", "%20")
-  artist_name <- artist_name %>%
-    str_replace_all("[^a-zA-Z\\s]", "") %>%
-    trimws() %>%
-    str_replace_all(" ", "%20")
-  url <- paste0("https://api.spotify.com/v1/search?q=track:", 
-                track_name, 
-                "%20artist:", 
-                artist_name, 
-                "&type=track&limit=1")
-  response <- GET(url, add_headers(Authorization = paste("Bearer", spotify_token)))
-  fromJSON(content(response, "text", encoding = "UTF-8"))$tracks$items$id
-}
-
-get_audio_features <- function(track_id) {
-  #build in delay to not get rate limited
-  Sys.sleep(0.4)
-  url = paste0("https://api.spotify.com/v1/audio-features/", track_id)
-  response <- GET(url, add_headers(Authorization = paste("Bearer", spotify_token)))
-  data <- fromJSON(content(response, "text", encoding = "UTF-8"))
-  if ("error" %in% names(data)) {
-    source("scripts/generate_token.R")
-    Sys.sleep(0.4)
-    response <- GET(url, add_headers(Authorization = paste("Bearer", spotify_token)))
-    data <- fromJSON(content(response, "text", encoding = "UTF-8"))
-    return(data)
-  } else {
-    return(data)
-  }
-}
-```
-
 Match tracks to stuff using API functions.
 
 ```{r}
-unique_tracks <- streaming_history %>%
+track_features <- streaming_history %>%
   select(artistName, trackName) %>%
   distinct() %>%
   mutate(
@@ -135,22 +75,41 @@ unique_tracks <- streaming_history %>%
                          )
   )
 
-source("scripts/generate_token.R")
+n_error <- track_features %>%
+  filter(map_lgl(audio_features, ~"error" %in% names(.x))) %>%
+  nrow()
 
-unique_tracks_2 <- unique_tracks %>%
-  filter(map_lgl(audio_features, ~"error" %in% names(.x))) %>% 
-  mutate(
-    audio_features = map(trackID,
-                         ~get_audio_features(.x),
-                         .progress = "Getting Audio Features"
-                         )
-  )
+track_features <- track_features %>%
+  filter(!map_lgl(audio_features, ~"error" %in% names(.x)))
 
-unique_tracks_combined <- bind_rows(unique_tracks %>%
-                                      filter(!map_lgl(audio_features, ~"error" %in% names(.x))),
-                                    unique_tracks_2)
+while (n_error > 0) {
+  source("scripts/generate_token.R")
+  
+  track_features_2 <- track_features %>%
+    filter(map_lgl(audio_features, ~"error" %in% names(.x))) %>% 
+    mutate(
+      audio_features = map(trackID,
+                           ~get_audio_features(.x),
+                           .progress = "Getting Audio Features"
+                           )
+    )
+  
+  track_features <- bind_rows(track_features,
+                              track_features_2)
+  
+  n_error <- track_features %>%
+    filter(map_lgl(audio_features, ~"error" %in% names(.x))) %>%
+    nrow()
+  
+  track_features <- track_features %>%
+    filter(!map_lgl(audio_features, ~"error" %in% names(.x)))
+  
+  print(paste0("n_error: ", n_error))
+}
+```
 
-unique_tracks_split <- unique_tracks_combined %>%
+```{r}
+track_features_wide <- track_features %>%
   filter(trackID != "NULL") %>%
   mutate(label = map(audio_features, names)) %>%
   unnest(c(audio_features, label)) %>%
@@ -187,5 +146,6 @@ unique_tracks_split <- unique_tracks_combined %>%
          duration_ms = as.numeric(duration_ms),
          time_signature = as.numeric(time_signature))
 
-write.csv(unique_tracks_split, file = "track_features.csv", row.names = FALSE)
+write.csv(track_features_wide, file = "track_features.csv", row.names = FALSE)
 ```
+

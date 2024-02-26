@@ -9,82 +9,56 @@ output: html_document
 source("scripts/packages.R")
 ```
 
-Summarise based on genre.
-
-```{r}
-genre_history <- left_join(streaming_history,
-                           unique_artists,
-                           by = c("artistName")
-                           ) %>%
-  select(-artistID) %>%
-  unnest(genre) %>%
-  mutate(genre = unlist(genre))
-
-top_genres <- data.frame(
-  month = genre_history %>%
-    filter(month != max(month),
-           month != min(month)) %>%
-    select(month) %>%
-    distinct()
-) %>%
-  mutate(
-    top_genres = map(month,
-                      ~genre_history %>%
-                        filter(month == .x) %>%
-                        group_by(genre) %>%
-                        summarise(time = sum(msPlayed)) %>%
-                        slice_max(time, n= 10) %>%
-                        pull(genre))
-  )
-
-genre_summary <- genre_history %>%
-  filter(month != max(month),
-         month != min(month)) %>%
-  left_join(top_genres,
-            by = "month") %>%
-  rowwise() %>%
-  filter(genre %in% top_genres) %>%
-  group_by(genre, month) %>%
-  summarise(hours_listened = sum(msPlayed/(1000*60)))
-
-ggplot(genre_summary, aes(x = month, y = hours_listened, fill = genre, label = genre)) +
-  geom_bar(position = "fill", stat = "identity") +
-  geom_text(size = 3, position = position_fill(vjust = 0.5)) +
-  theme(legend.position = "none")
-```
-
 Summarise based on artist.
 
 ```{r}
 top_artists <- data.frame(
-  month = streaming_history %>%
-    filter(month != max(month),
-           month != min(month)) %>%
+  month = full_streaming_history %>%
     select(month) %>%
     distinct()
 ) %>%
   mutate(
     top_artists = map(month,
-                      ~streaming_history %>%
+                      ~full_streaming_history %>%
                         filter(month == .x) %>%
-                        group_by(artistName) %>%
-                        summarise(time = sum(msPlayed)) %>%
-                        slice_max(time, n= 10) %>%
-                        pull(artistName))
+                        group_by(artist_name) %>%
+                        summarise(time = sum(ms_played)) %>%
+                        slice_max(time, n = 10) %>%
+                        pull(artist_name))
   )
 
-artist_summary <- streaming_history %>%
-  filter(month != max(month),
-         month != min(month)) %>%
+artist_summary <- full_streaming_history %>%
   left_join(top_artists,
             by = "month") %>%
   rowwise() %>%
-  filter(artistName %in% top_artists) %>%
-  group_by(artistName, month) %>%
-  summarise(hours_listened = sum(msPlayed/(1000*60)))
+  filter(artist_name %in% top_artists) %>%
+  group_by(artist_name, month) %>%
+  summarise(hours_listened = sum(ms_played/(1000*60)))
 
-ggplot(artist_summary, aes(x = month, y = hours_listened, fill = artistName, label = artistName)) +
+ggplot(artist_summary, aes(x = month, y = hours_listened, fill = artist_name, label = artist_name)) +
   geom_bar(position = "fill", stat = "identity") +
   geom_text(size = 3, position = position_fill(vjust = 0.5)) +
   theme(legend.position = "none")
 ```
+
+Summarise based on kmeans cluster.
+
+```{r}
+cluster_summary <- full_streaming_history %>%
+  select(month,
+         track_name,
+         artist_name,
+         ms_played) %>%
+  na.omit() %>%
+  left_join(track_clusters, 
+            by = c("track_name", "artist_name")) %>%
+  group_by(month, cluster) %>%
+  summarise(hours_listened = sum(ms_played/(1000*60)))
+
+ggplot(cluster_summary, aes(x = month, y = hours_listened, fill = cluster, label = cluster)) +
+  geom_bar(position = "fill", stat = "identity")
+
+ggplot(cluster_summary, aes(x = month, y = hours_listened, fill = cluster, label = cluster)) +
+  geom_bar(stat = "identity")
+```
+
