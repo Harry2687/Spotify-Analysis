@@ -1,0 +1,12 @@
+name: shiny_dashboard
+title:
+username: harryz
+account: harryz
+server: shinyapps.io
+hostUrl: https://api.shinyapps.io/v1
+appId: 11406313
+bundleId: 8381090
+url: https://harryz.shinyapps.io/shiny_dashboard/
+version: 1
+asMultiple: FALSE
+asStatic: FALSE

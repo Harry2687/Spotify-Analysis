@@ -1,0 +1,12 @@
+name: spotify_clustering_dashboard
+title: spotify_clustering_dashboard
+username: harryz
+account: harryz
+server: shinyapps.io
+hostUrl: https://api.shinyapps.io/v1
+appId: 11510016
+bundleId: 8381154
+url: https://harryz.shinyapps.io/spotify_clustering_dashboard/
+version: 1
+asMultiple: FALSE
+asStatic: FALSE

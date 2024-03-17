@@ -44,20 +44,19 @@ feature_matrix <- full_track_features %>%
 
 ```{r}
 kmeans_select_features <- function(n, data, nstart, itermax) {
-  n_factors <- n
-  
   comb_n <- data %>%
     colnames() %>%
-    combn(n_factors, simplify = FALSE)
+    combn(n, simplify = FALSE)
   
-  old_cols <- seq(1, n_factors)
-  new_cols <- paste0("factor_", seq(1, n_factors))
+  old_cols <- seq(1, n)
+  new_cols <- paste0("factor_", seq(1, n))
   
   new_cols_sym <- syms(new_cols)
   
   factor_combinations_n <- do.call(rbind.data.frame, comb_n) %>%
     rename_with(~new_cols, all_of(old_cols)) %>%
     mutate(factors = pmap(list(!!!new_cols_sym), c)) %>%
+    mutate(n_factors = n) %>%
     select(-(!!new_cols)) %>%
     mutate(data = map(factors,
                       ~data %>%
@@ -72,7 +71,7 @@ kmeans_select_features <- function(n, data, nstart, itermax) {
                               select(clusters) %>%
                               as.numeric(),
                             .progress = paste("Finding optimal n_clusters:", 
-                                              n_factors, 
+                                              n, 
                                               "factors")) %>%
              as.numeric()) %>% 
     mutate(km = map2(data,
@@ -83,7 +82,7 @@ kmeans_select_features <- function(n, data, nstart, itermax) {
                              iter.max = itermax,
                              algorithm = "MacQueen"),
                      .progress = paste("Calculating kmeans:", 
-                                       n_factors, 
+                                       n, 
                                        "factors"))) %>%
     mutate(total_withinss = map(km,
                                 ~.x$tot.withinss) %>%
@@ -96,8 +95,7 @@ kmeans_select_features <- function(n, data, nstart, itermax) {
                           ~fviz_cluster(.x,
                                         data = .y,
                                         geom = "point",
-                                        ellipse.type = "convex",
-                                        ggtheme = theme_bw()))) %>%
+                                        ellipse.type = "convex"))) %>%
     arrange(desc(bsstssRatio))  
   
   return(factor_combinations_n)
@@ -126,13 +124,13 @@ registerDoParallel(cl)
 start_time <- Sys.time()
 
 kmeans_nfact <- foreach(n = seq(2, ncol(feature_matrix)),
-                                 .packages = c("tidyverse",
-                                               "cluster",
-                                               "factoextra",
-                                               "rlang"),
-                                 .combine = bind_rows) %dopar% {
-                                   kmeans_select_features(n, feature_matrix, 25, 1000)
-                                 } %>% 
+                        .packages = c("tidyverse",
+                                      "cluster",
+                                      "factoextra",
+                                      "rlang"),
+                        .combine = bind_rows) %dopar% {
+                          kmeans_select_features(n, feature_matrix, 25, 1000)
+                        } %>% 
   arrange(desc(bsstssRatio))
 
 end_time <- Sys.time()

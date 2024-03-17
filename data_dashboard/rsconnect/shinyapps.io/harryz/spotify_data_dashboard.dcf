@@ -1,0 +1,12 @@
+name: spotify_data_dashboard
+title: spotify_data_dashboard
+username: harryz
+account: harryz
+server: shinyapps.io
+hostUrl: https://api.shinyapps.io/v1
+appId: 11510075
+bundleId: 8381175
+url: https://harryz.shinyapps.io/spotify_data_dashboard/
+version: 1
+asMultiple: FALSE
+asStatic: FALSE
