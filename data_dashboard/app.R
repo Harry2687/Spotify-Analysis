@@ -43,15 +43,8 @@ ui <- fluidPage(
   sidebarLayout(
     sidebarPanel(
       sliderInput(
-        "top_n_artists",
-        "Top n Artists",
-        min = 1,
-        max = 20,
-        value = 10
-      ),
-      sliderInput(
-        "top_n_tracks",
-        "Top n Tracks",
+        "top_n",
+        "Top n",
         min = 1,
         max = 20,
         value = 10
@@ -84,11 +77,11 @@ ui <- fluidPage(
 
 server <- function(input, output) {
   output$artist_history_title <- renderText({
-    top_n_artists <- input$top_n_artists
+    top_n <- input$top_n
     
     paste0(
       "Proportion of Hours Listened: Top ",
-      top_n_artists,
+      top_n,
       " Artists"
     )
   })
@@ -106,7 +99,7 @@ server <- function(input, output) {
             filter(month == .x) %>%
             group_by(artist_name) %>%
             summarise(time = sum(ms_played)) %>%
-            slice_max(time, n = as.numeric(input$top_n_artists)) %>%
+            slice_max(time, n = as.numeric(input$top_n)) %>%
             pull(artist_name)
         )
       )
@@ -137,11 +130,11 @@ server <- function(input, output) {
   })
   
   output$track_history_title <- renderText({
-    top_n_tracks <- input$top_n_tracks
+    top_n <- input$top_n
     
     paste0(
       "Proportion of Hours Listened: Top ",
-      top_n_tracks,
+      top_n,
       " Tracks"
     )
   })
@@ -160,7 +153,7 @@ server <- function(input, output) {
             mutate(track_artist_name = paste(track_name, artist_name, sep = "\n")) %>%
             group_by(track_artist_name) %>%
             summarise(time = sum(ms_played)) %>%
-            slice_max(time, n = as.numeric(input$top_n_tracks)) %>%
+            slice_max(time, n = as.numeric(input$top_n)) %>%
             pull(track_artist_name)
         )
       )

@@ -5,7 +5,7 @@ account: harryz
 server: shinyapps.io
 hostUrl: https://api.shinyapps.io/v1
 appId: 11510075
-bundleId: 8381175
+bundleId: 8408384
 url: https://harryz.shinyapps.io/spotify_data_dashboard/
 version: 1
 asMultiple: FALSE
